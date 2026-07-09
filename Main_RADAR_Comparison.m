@@ -1,3 +1,8 @@
+%% 0. Setup paths
+repoRoot = fileparts(mfilename('fullpath'));
+addpath(repoRoot);
+addpath(genpath(repoRoot));
+
 %% 1. Simulation Configuration
 rng(42);
 config = struct('num_runs', 50, 'azimuth_stds', 0:2:10, 'dt', 0.01, 'dt_radar', 0.1, 't_end', 200);
