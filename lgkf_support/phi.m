@@ -16,6 +16,7 @@ function Phi = phi(a)
         error('phi: input must be a 3- or 5-vector');
     end
 
+    % Compute the 5x5 matrix representation of ad_G(a)
     theta = a(3);
     A = zeros(5);
     A(1,2) = -theta;

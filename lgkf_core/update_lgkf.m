@@ -1,5 +1,10 @@
 function [g, P] = update_lgkf(g, P, z, az_std)
     R = diag([max(az_std^2, 1e-8), 10.0^2, 1.0^2]);
+    
+    % g: Predicted state (5x1), \mu_{k|k-1} of the paper
+    % P: Predicted covariance (5x5), \P_{k|k-1} of the paper
+    % Equation implementation sequence: 26 -> 25 -> 24 -> 23 -> 21 -> 22  
+    
     v = lie2vec_radar(g);
     px=v(1); py=v(2); pth=v(3); pv=v(4); 
     rho_sq = px^2+py^2; alpha = atan2(py,px);
@@ -16,6 +21,7 @@ function [g, P] = update_lgkf(g, P, z, az_std)
     innov = [z(1)-alpha; z(2)-sqrt(rho_sq); z(3)-pv*cos(alpha-pth)];
     innov(1) = atan2(sin(innov(1)), cos(innov(1)));
     
-    g = g * expm(hat_map(K * innov));
-    P = (eye(5) - K * H) * P;
+    m = K * innov;
+    g = g * expm(hat_map(m));   
+    P = phi(m)*(eye(5) - K * H) * P*phi(m)';
 end
