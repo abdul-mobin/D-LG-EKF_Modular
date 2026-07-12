@@ -1,8 +1,13 @@
-function run_nees_analysis()
-    % Example wrapper that computes NEES for one EKF and one LGKF run.
+function run_nees_analysis(n_trials)
+    % Compute NEES values for many trajectories using the LGKF (and optionally EKF).
     %
-    % This script uses the repository's existing filter routines and a single
-    % simulated trajectory. You can adapt it to your Monte-Carlo sweep as needed.
+    % Usage:
+    %   run('testing/run_nees_analysis')          % defaults to 50 trials
+    %   run('testing/run_nees_analysis', 200)     % run 200 trajectories
+
+    if nargin < 1 || isempty(n_trials)
+        n_trials = 50;
+    end
 
     repoRoot = fileparts(fileparts(mfilename('fullpath')));
     addpath(repoRoot);
@@ -17,20 +22,25 @@ function run_nees_analysis()
     Q = diag([0, 0, 0, noise.std_v^2, noise.std_omega^2]);
     az_std = deg2rad(5);
 
-    true_state = generate_ground_truth(config, noise);
+    rng(42);
+    nees_lgkf_all = [];
 
-    [ekf_states, ekf_P_history] = run_filter_for_nees(true_state, Q, config, az_std, 'ekf');
-    [lgkf_states, lgkf_P_history] = run_filter_for_nees(true_state, Q, config, az_std, 'lgkf');
+    for trial = 1:n_trials
+        true_state = generate_ground_truth(config, noise);
 
-    true_states = true_state(1:5, :)';
+        [~, lgkf_P_history] = run_filter_for_nees(true_state, Q, config, az_std, 'lgkf');
+        true_states = true_state(1:5, :)';
 
-    nees_ekf = compute_nees(ekf_states, true_states, ekf_P_history);
-    nees_lgkf = compute_nees(lgkf_states, true_states, lgkf_P_history);
+        % For LGKF, the state is stored in the Lie-group coordinates and must be
+        % converted back to the Euclidean state vector before NEES computation.
+        [lgkf_states, ~] = run_filter_for_nees(true_state, Q, config, az_std, 'lgkf');
+        nees_lgkf = compute_nees(lgkf_states, true_states, lgkf_P_history);
+        nees_lgkf_all = [nees_lgkf_all; nees_lgkf];
+    end
 
-    fprintf('EKF NEES summary\n');
-    check_consistency(nees_ekf, 5);
-    fprintf('\nLGKF NEES summary\n');
-    check_consistency(nees_lgkf, 5);
+    fprintf('LGKF NEES summary over %d trajectories\n', n_trials);
+    check_consistency(nees_lgkf_all, 5);
+    inspect_nees_distribution(nees_lgkf_all);
 end
 
 function [states, P_history] = run_filter_for_nees(true_state, Q, config, az_std, filter_type)
