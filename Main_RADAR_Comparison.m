@@ -9,9 +9,31 @@ config = struct('num_runs', 50, 'azimuth_stds', 0:2:10, 'dt', 0.01, 'dt_radar', 
 config.N = round(config.t_end / config.dt) + 1;
 config.meas_steps = round(config.dt_radar / config.dt);
 
-% Noise specs
+% Noise specs and process-noise tuning
 noise.std_v = 0.03; noise.std_omega = deg2rad(0.2);
-noise.Q_sys = diag([0, 0, 0, noise.std_v^2, noise.std_omega^2]);
+
+% Separate tuning knobs for the EKF and LGKF process-noise covariance.
+% These scale the nominal velocity/turn-rate noise terms independently.
+config.q_tuning = struct( ...
+    'ekf', struct('v', 1.0, 'omega', 1.0), ...
+    'lgkf', struct('v', 1.0, 'omega', 1.0));
+
+% Try to load tuned Q matrices from disk when available; otherwise fall back to
+% the default manual scaling above.
+matfile = fullfile(repoRoot, 'tuned_Q_matrices_2param.mat');
+if exist(matfile, 'file')
+    loaded = load(matfile);
+    noise.Q_sys_ekf = loaded.Q_ekf_tuned;
+    noise.Q_sys_lgkf = loaded.Q_lgkf_tuned;
+else
+    noise.Q_sys_ekf = diag([0, 0, 0, ...
+        (config.q_tuning.ekf.v * noise.std_v)^2, ...
+        (config.q_tuning.ekf.omega * noise.std_omega)^2]);
+
+    noise.Q_sys_lgkf = diag([0, 0, 0, ...
+        (config.q_tuning.lgkf.v * noise.std_v)^2, ...
+        (config.q_tuning.lgkf.omega * noise.std_omega)^2]);
+end
 
 results_ekf = zeros(length(config.azimuth_stds), 1);
 results_lg = zeros(length(config.azimuth_stds), 1);
@@ -34,8 +56,8 @@ for az_idx = 1:length(config.azimuth_stds)
         
         for k = 2:config.N
             % PREDICTION
-            [state_ekf, P_ekf] = predict_ekf(state_ekf, P_ekf, noise.Q_sys, config.dt);
-            [g_lgkf, P_lgkf]   = predict_lgkf(g_lgkf, P_lgkf, noise.Q_sys, config.dt);
+            [state_ekf, P_ekf] = predict_ekf(state_ekf, P_ekf, noise.Q_sys_ekf, config.dt);
+            [g_lgkf, P_lgkf]   = predict_lgkf(g_lgkf, P_lgkf, noise.Q_sys_lgkf, config.dt);
             
             % UPDATE
             if mod(k, config.meas_steps) == 0
