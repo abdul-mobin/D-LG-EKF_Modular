@@ -157,11 +157,19 @@ classdef RadarDiagnosticsRunner
             inspect_nees_distribution(neesAll);
         end
 
-        function sweepTrackLossByTEnd(obj)
-            t_end_values = [20 50 100 200];
-            nTrials = 500;
-            threshold = 1000;
-            fullLossGroupSteps = 20;
+        function sweepTrackLossByTEnd(obj, t_end_values, nTrials, threshold, fullLossGroupSteps)
+            if nargin < 2 || isempty(t_end_values)
+                t_end_values = [20 50 100 200];
+            end
+            if nargin < 3 || isempty(nTrials)
+                nTrials = 500;
+            end
+            if nargin < 4 || isempty(threshold)
+                threshold = 1000;
+            end
+            if nargin < 5 || isempty(fullLossGroupSteps)
+                fullLossGroupSteps = 20;
+            end
 
             noise = obj.BaseRunner.buildProcessNoise();
             az_std = deg2rad(5);
@@ -192,17 +200,20 @@ classdef RadarDiagnosticsRunner
             end
         end
 
-        function tuneQTwoParams(obj)
+        function tuneQTwoParams(obj, nTraj)
+            if nargin < 2 || isempty(nTraj)
+                nTraj = 20;
+            end
+
             noise = obj.BaseRunner.buildProcessNoise();
             sigma_v = noise.std_v;
             sigma_omega = noise.std_omega;
             Q_true = diag([0, 0, 0, sigma_v^2, sigma_omega^2]);
 
-            config = obj.BaseRunner.buildComparisonConfig(20, [], 0.01, 0.1, 200);
+            config = obj.BaseRunner.buildComparisonConfig(nTraj, [], 0.01, 0.1, 200);
             az_std = deg2rad(5);
 
             rng(42);
-            nTraj = 20;
             trajectories = cell(nTraj, 1);
             for i = 1:nTraj
                 trajectories{i} = generate_ground_truth(config, noise);
