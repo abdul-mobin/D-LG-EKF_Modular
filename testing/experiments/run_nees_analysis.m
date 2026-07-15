@@ -2,14 +2,14 @@ function run_nees_analysis(n_trials)
     % Compute NEES values for many trajectories using the LGKF (and optionally EKF).
     %
     % Usage:
-    %   run('testing/run_nees_analysis')          % defaults to 50 trials
-    %   run('testing/run_nees_analysis', 200)     % run 200 trajectories
+    %   run('testing/experiments/run_nees_analysis')          % defaults to 50 trials
+    %   run('testing/experiments/run_nees_analysis', 200)     % run 200 trajectories
 
     if nargin < 1 || isempty(n_trials)
         n_trials = 50;
     end
 
-    repoRoot = fileparts(fileparts(mfilename('fullpath')));
+    repoRoot = fileparts(fileparts(fileparts(mfilename('fullpath'))));
     addpath(repoRoot);
     addpath(genpath(repoRoot));
 

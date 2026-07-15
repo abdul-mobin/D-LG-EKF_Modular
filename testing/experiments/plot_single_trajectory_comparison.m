@@ -8,7 +8,7 @@ function plot_single_trajectory_comparison(traj_idx, az_std_deg)
     % Example:
     %   plot_single_trajectory_comparison(1, 5)
 
-    repoRoot = fileparts(mfilename('fullpath'));
+    repoRoot = fileparts(fileparts(fileparts(mfilename('fullpath'))));
     addpath(repoRoot);
     addpath(genpath(repoRoot));
 
@@ -24,14 +24,14 @@ function plot_single_trajectory_comparison(traj_idx, az_std_deg)
     az_std = deg2rad(az_std_deg);
     Q = diag([0, 0, 0, sigma_v^2, sigma_omega^2]);
 
-    rng(42);
+    % rng(42);
     trajectories = cell(10, 1);
     for i = 1:numel(trajectories)
         trajectories{i} = generate_ground_truth(config, noise);
     end
 
     true_state = trajectories{traj_idx};
-
+        
     [ekf_xy, lgkf_xy] = run_filters_for_plot(true_state, Q, config, az_std);
 
     figure('Color', 'w', 'Position', [200, 200, 900, 600]);

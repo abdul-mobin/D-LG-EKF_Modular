@@ -5,7 +5,7 @@ function tune_Q_two_params()
     % trajectory generation, and measurement model instead of a standalone
     % toy example.
 
-    repoRoot = fileparts(mfilename('fullpath'));
+    repoRoot = fileparts(fileparts(fileparts(mfilename('fullpath'))));
     addpath(repoRoot);
     addpath(genpath(repoRoot));
 

@@ -2,14 +2,14 @@ function run_diagnose_P_growth(filter_type)
     % Generate the state/covariance histories needed by diagnose_P_growth.
     %
     % Usage:
-    %   run('testing/run_diagnose_P_growth')           % EKF run
-    %   run('testing/run_diagnose_P_growth', 'lgkf')   % LGKF run
+    %   run('testing/experiments/run_diagnose_P_growth')           % EKF run
+    %   run('testing/experiments/run_diagnose_P_growth', 'lgkf')   % LGKF run
 
     if nargin < 1 || isempty(filter_type)
         filter_type = 'ekf';
     end
 
-    repoRoot = fileparts(fileparts(mfilename('fullpath')));
+    repoRoot = fileparts(fileparts(fileparts(mfilename('fullpath'))));
     addpath(repoRoot);
     addpath(genpath(repoRoot));
 
