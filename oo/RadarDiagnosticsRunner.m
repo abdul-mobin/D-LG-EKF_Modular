@@ -29,14 +29,10 @@ classdef RadarDiagnosticsRunner
             noise = obj.BaseRunner.buildProcessNoise();
             az_std = deg2rad(azStdDeg);
 
-            rng(42);
-            trajectories = cell(10, 1);
-            for i = 1:numel(trajectories)
-                trajectories{i} = generate_ground_truth(config, noise);
-            end
+            trajectories = obj.BaseRunner.generateTrajectories(config, noise, 10, 42);
 
             true_state = trajectories{trajIdx};
-            [ekf_xy, lgkf_xy] = obj.runPositionTrajectory(true_state, noise, config, az_std);
+            [ekf_xy, lgkf_xy] = obj.BaseRunner.runPositionTrajectory(true_state, noise, config, az_std);
 
             figure('Color', 'w', 'Position', [200, 200, 900, 600]);
             plot(true_state(1, :), true_state(2, :), 'k-', 'LineWidth', 2, 'DisplayName', 'Ground truth');
@@ -64,14 +60,20 @@ classdef RadarDiagnosticsRunner
             az_std = deg2rad(5);
 
             rng(40);
+            trajectories = obj.BaseRunner.generateTrajectories(config, noise, nTrials, 40);
             nanCount = 0;
             infCount = 0;
             negativeEigCount = 0;
             tinyThetaCount = 0;
 
+            [all_states, all_P_history, all_theta_history] = ...
+                obj.BaseRunner.runStateHistoryBatch(trajectories, noise, config, az_std, filterType);
+
             for trial = 1:nTrials
-                true_state = generate_ground_truth(config, noise);
-                [mu_hist, P_hist, theta_hist] = obj.runStateHistory(true_state, noise, config, az_std, filterType);
+                true_state = trajectories{trial};
+                mu_hist = all_states{trial};
+                P_hist = all_P_history{trial};
+                theta_hist = all_theta_history{trial};
 
                 nanCount = nanCount + any(isnan(mu_hist(:))) + any(isnan(P_hist(:)));
                 infCount = infCount + any(isinf(mu_hist(:))) + any(isinf(P_hist(:)));
@@ -99,7 +101,7 @@ classdef RadarDiagnosticsRunner
                 end
 
                 thetaErrRaw = mu_hist(:, 3) - true_state(3, :).';
-                thetaErrWrapped = obj.wrapAngle(thetaErrRaw);
+                thetaErrWrapped = obj.BaseRunner.wrapAngle(thetaErrRaw);
 
                 fprintf('Raw theta error range: [%.2f, %.2f] rad\n', min(thetaErrRaw), max(thetaErrRaw));
                 fprintf('Wrapped theta error range: [%.2f, %.2f] rad\n', min(thetaErrWrapped), max(thetaErrWrapped));
@@ -126,7 +128,8 @@ classdef RadarDiagnosticsRunner
             az_std = deg2rad(5);
 
             true_state = generate_ground_truth(config, noise);
-            [mu_hist, P_hist, true_states] = obj.runStateHistory(true_state, noise, config, az_std, filterType);
+            [mu_hist, P_hist, ~] = obj.BaseRunner.runStateHistory(true_state, noise, config, az_std, filterType);
+            true_states = true_state(1:5, :)';
             diagnose_P_growth(mu_hist, P_hist, true_states, config.dt);
         end
 
@@ -142,15 +145,14 @@ classdef RadarDiagnosticsRunner
             noise = obj.BaseRunner.buildProcessNoise();
             az_std = deg2rad(5);
 
-            rng(42);
-            neesAll = [];
-
+            trajectories = obj.BaseRunner.generateTrajectories(config, noise, nTrials, 42);
+            [all_states, all_P_history, ~] = obj.BaseRunner.runStateHistoryBatch(trajectories, noise, config, az_std, filterType);
+            nees_cells = cell(nTrials, 1);
             for trial = 1:nTrials
-                true_state = generate_ground_truth(config, noise);
-                [states, P_history] = obj.runStateHistory(true_state, noise, config, az_std, filterType);
-                true_states = true_state(1:5, :)';
-                neesAll = [neesAll; compute_nees(states, true_states, P_history)]; %#ok<AGROW>
+                true_states = trajectories{trial}(1:5, :)';
+                nees_cells{trial} = compute_nees(all_states{trial}, true_states, all_P_history{trial});
             end
+            neesAll = vertcat(nees_cells{:});
 
             fprintf('%s NEES summary over %d trajectories\n', upper(filterType), nTrials);
             check_consistency(neesAll, 5);
@@ -185,15 +187,9 @@ classdef RadarDiagnosticsRunner
                 all_est_lgkf = cell(nTrials, 1);
                 all_true = cell(nTrials, 1);
 
-                rng(42);
-                for trial = 1:nTrials
-                    true_state = generate_ground_truth(config, noise);
-                    [ekf_xy, lgkf_xy] = obj.runPositionTrajectory(true_state, noise, config, az_std);
-
-                    all_est_ekf{trial} = ekf_xy;
-                    all_est_lgkf{trial} = lgkf_xy;
-                    all_true{trial} = true_state(1:2, :).';
-                end
+                trajectories = obj.BaseRunner.generateTrajectories(config, noise, nTrials, 42);
+                [all_est_ekf, all_est_lgkf, ~, ~] = obj.BaseRunner.runTrajectoryBatch(trajectories, noise, config, az_std);
+                all_true = cellfun(@(state) state(1:2, :).', trajectories, 'UniformOutput', false);
 
                 fprintf('\n t_end = %.1f s \n', tEnd);
                 report_track_loss_stats(all_est_ekf, all_est_lgkf, all_true, config.dt, threshold, fullLossGroupSteps);
@@ -213,162 +209,23 @@ classdef RadarDiagnosticsRunner
             config = obj.BaseRunner.buildComparisonConfig(nTraj, [], 0.01, 0.1, 200);
             az_std = deg2rad(5);
 
-            rng(42);
-            trajectories = cell(nTraj, 1);
-            for i = 1:nTraj
-                trajectories{i} = generate_ground_truth(config, noise);
-            end
+            trajectories = obj.BaseRunner.generateTrajectories(config, noise, nTraj, 42);
 
             opts = optimset('Display', 'iter', 'TolX', 1e-3, 'TolFun', 1e-3);
             x0 = [0, 0];
 
-            objective_ekf = @(x) obj.rmseForTwoScales(x, Q_true, config, az_std, trajectories, 'ekf');
+            objective_ekf = @(x) obj.BaseRunner.rmseForTwoScales(x, Q_true, config, az_std, trajectories, 'ekf');
             x_ekf = fminsearch(objective_ekf, x0, opts);
-            Q_ekf_tuned = obj.scaleQ(Q_true, x_ekf);
+            Q_ekf_tuned = obj.BaseRunner.scaleQ(Q_true, x_ekf);
 
-            objective_lgkf = @(x) obj.rmseForTwoScales(x, Q_true, config, az_std, trajectories, 'lgkf');
+            objective_lgkf = @(x) obj.BaseRunner.rmseForTwoScales(x, Q_true, config, az_std, trajectories, 'lgkf');
             x_lgkf = fminsearch(objective_lgkf, x0, opts);
-            Q_lgkf_tuned = obj.scaleQ(Q_true, x_lgkf);
+            Q_lgkf_tuned = obj.BaseRunner.scaleQ(Q_true, x_lgkf);
 
             fprintf('EKF  : scale_v = %.4f, scale_omega = %.4f\n', exp(x_ekf(1)), exp(x_ekf(2)));
             fprintf('LGKF : scale_v = %.4f, scale_omega = %.4f\n', exp(x_lgkf(1)), exp(x_lgkf(2)));
 
             save(fullfile(obj.BaseRunner.RepoRoot, 'tuned_Q_matrices_2param.mat'), 'Q_ekf_tuned', 'Q_lgkf_tuned');
-        end
-    end
-
-    methods (Access = private)
-        function [ekf_xy, lgkf_xy] = runPositionTrajectory(obj, true_state, noise, config, az_std)
-            [x, P_ekf] = init_ekf(true_state(:, 1));
-            [g, P_lgkf] = init_lgkf(true_state(:, 1));
-
-            ekf_xy = zeros(config.N, 2);
-            lgkf_xy = zeros(config.N, 2);
-
-            ekf_xy(1, :) = x(1:2).';
-            lg_vec = lie2vec_radar(g);
-            lgkf_xy(1, :) = lg_vec(1:2).';
-
-            for k = 2:config.N
-                [x, P_ekf] = predict_ekf(x, P_ekf, noise.Q_sys_ekf, config.dt);
-                [g, P_lgkf] = predict_lgkf(g, P_lgkf, noise.Q_sys_lgkf, config.dt);
-
-                if mod(k, config.meas_steps) == 0
-                    z = get_radar_measurement(true_state(:, k), az_std);
-                    [x, P_ekf] = update_ekf(x, P_ekf, z, az_std);
-                    [g, P_lgkf] = update_lgkf(g, P_lgkf, z, az_std);
-                end
-
-                ekf_xy(k, :) = x(1:2).';
-                lg_vec = lie2vec_radar(g);
-                lgkf_xy(k, :) = lg_vec(1:2).';
-            end
-        end
-
-        function [states, P_history, theta_history] = runStateHistory(obj, true_state, noise, config, az_std, filterType)
-            if strcmpi(filterType, 'ekf')
-                [x, P] = init_ekf(true_state(:, 1));
-            else
-                [g, P] = init_lgkf(true_state(:, 1));
-            end
-
-            states = zeros(config.N, 5);
-            P_history = zeros(5, 5, config.N);
-            theta_history = zeros(config.N, 1);
-
-            if strcmpi(filterType, 'ekf')
-                states(1, :) = x.';
-                theta_history(1) = x(3);
-            else
-                lg_vec = lie2vec_radar(g);
-                states(1, :) = lg_vec.';
-                theta_history(1) = lg_vec(3);
-            end
-            P_history(:, :, 1) = P;
-
-            for k = 2:config.N
-                if strcmpi(filterType, 'ekf')
-                    [x, P] = predict_ekf(x, P, noise.Q_sys_ekf, config.dt);
-                    if mod(k, config.meas_steps) == 0
-                        z = get_radar_measurement(true_state(:, k), az_std);
-                        [x, P] = update_ekf(x, P, z, az_std);
-                    end
-                    states(k, :) = x.';
-                    theta_history(k) = x(3);
-                else
-                    [g, P] = predict_lgkf(g, P, noise.Q_sys_lgkf, config.dt);
-                    if mod(k, config.meas_steps) == 0
-                        z = get_radar_measurement(true_state(:, k), az_std);
-                        [g, P] = update_lgkf(g, P, z, az_std);
-                    end
-                    lg_vec = lie2vec_radar(g);
-                    states(k, :) = lg_vec.';
-                    theta_history(k) = lg_vec(3);
-                end
-                P_history(:, :, k) = P;
-            end
-        end
-
-        function rmse = rmseForTwoScales(obj, logScales, QBase, config, az_std, trajectories, filterType)
-            Q = obj.scaleQ(QBase, logScales);
-            nTraj = numel(trajectories);
-            errs = zeros(nTraj, 1);
-
-            for i = 1:nTraj
-                traj = trajectories{i};
-                if strcmp(filterType, 'ekf')
-                    est_xy = obj.runEkfTuning(traj, Q, config, az_std);
-                else
-                    est_xy = obj.runLgkfTuning(traj, Q, config, az_std);
-                end
-
-                pos_err = sqrt(sum((est_xy - traj(1:2, :)').^2, 2));
-                errs(i) = sqrt(mean(pos_err.^2));
-            end
-
-            rmse = mean(errs);
-        end
-
-        function Q = scaleQ(~, QBase, logScales)
-            Q = QBase;
-            Q(4, 4) = QBase(4, 4) * exp(logScales(1));
-            Q(5, 5) = QBase(5, 5) * exp(logScales(2));
-        end
-
-        function est_xy = runEkfTuning(~, true_state, Q, config, az_std)
-            [x, P] = init_ekf(true_state(:, 1));
-            est_xy = zeros(config.N, 2);
-            est_xy(1, :) = x(1:2).';
-
-            for k = 2:config.N
-                [x, P] = predict_ekf(x, P, Q, config.dt);
-                if mod(k, config.meas_steps) == 0
-                    z = get_radar_measurement(true_state(:, k), az_std);
-                    [x, P] = update_ekf(x, P, z, az_std);
-                end
-                est_xy(k, :) = x(1:2).';
-            end
-        end
-
-        function est_xy = runLgkfTuning(~, true_state, Q, config, az_std)
-            [g, P] = init_lgkf(true_state(:, 1));
-            est_xy = zeros(config.N, 2);
-            lg_vec = lie2vec_radar(g);
-            est_xy(1, :) = lg_vec(1:2).';
-
-            for k = 2:config.N
-                [g, P] = predict_lgkf(g, P, Q, config.dt);
-                if mod(k, config.meas_steps) == 0
-                    z = get_radar_measurement(true_state(:, k), az_std);
-                    [g, P] = update_lgkf(g, P, z, az_std);
-                end
-                lg_vec = lie2vec_radar(g);
-                est_xy(k, :) = lg_vec(1:2).';
-            end
-        end
-
-        function wrapped = wrapAngle(~, theta)
-            wrapped = mod(theta + pi, 2 * pi) - pi;
         end
     end
 end
